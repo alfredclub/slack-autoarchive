@@ -14,14 +14,11 @@ import time
 ADMIN_CHANNEL      = os.getenv('ADMIN_CHANNEL')
 AUDIT_LOG          = 'audit.log'
 DAYS_INACTIVE      = int(os.getenv('DAYS_INACTIVE', 60))
-# set MIN_MEMBERS and any channels larger than this in people
-# are exempt from archiving. 0 is no limit.
-MIN_MEMBERS        = os.getenv('MIN_MEMBERS', 0)
 DRY_RUN            = (os.getenv('DRY_RUN', 'true') == 'true')
 SLACK_TOKEN        = os.getenv('SLACK_TOKEN')
 TOO_OLD_DATETIME   = datetime.now() - timedelta(days=DAYS_INACTIVE)
 WHITELIST_KEYWORDS = os.getenv('WHITELIST_KEYWORDS')
-THROTTLE_REQUESTS  = False
+THROTTLE_REQUESTS  = True
 SKIP_SUBTYPES      = {'channel_leave', 'channel_join'}  # 'bot_message'
 
 
@@ -105,18 +102,17 @@ def get_inactive_channels(all_unarchived_channels, too_old_datetime):
     sys.stdout.write('.')
     sys.stdout.flush()
     num_members = channel['num_members']
-    if num_members == 0:
+    # if num_members == 0 and :
+    #   inactive_channels.append(channel)
+    # else:
+    payload['channel'] = channel['id']
+    channel_history = slack_api_http(api_endpoint=api_endpoint, payload=payload)
+    (last_message_datetime, is_user) = get_last_message_timestamp(channel_history, datetime.fromtimestamp(float(channel['created'])))
+    # mark inactive if last message is too old, but don't
+    # if there have been bot messages and the channel has
+    # at least the minimum number of members
+    if last_message_datetime <= too_old_datetime:
       inactive_channels.append(channel)
-    else:
-      payload['channel'] = channel['id']
-      channel_history = slack_api_http(api_endpoint=api_endpoint, payload=payload)
-      (last_message_datetime, is_user) = get_last_message_timestamp(channel_history, datetime.fromtimestamp(float(channel['created'])))
-      # mark inactive if last message is too old, but don't
-      # if there have been bot messages and the channel has
-      # at least the minimum number of members
-      channel_not_too_big = (MIN_MEMBERS == 0 or MIN_MEMBERS < num_members)
-      if last_message_datetime <= too_old_datetime and channel_not_too_big:
-        inactive_channels.append(channel)
   return inactive_channels
 
 
@@ -129,9 +125,9 @@ def filter_out_exempt_channels(all_unarchived_channels):
         keywords = f.readlines()
     # remove whitespace characters like `\n` at the end of each line
     keywords = map(lambda x: x.strip(), keywords)
-
     if WHITELIST_KEYWORDS:
       keywords.append(WHITELIST_KEYWORDS.split(','))
+
 
     channels_not_exempt = []
     for channel in all_unarchived_channels:
@@ -160,7 +156,7 @@ def archive_inactive_channels(channels):
   print('Archive inactive channels...')
   api_endpoint = 'channels.archive'
   for channel in channels:
-    stdout_message = 'Archiving channel... %s' % channel['name']
+    stdout_message = 'Will archive channel... %s' % channel['name']
     if not DRY_RUN:
       channel_message = 'This channel has had no activity for %s days. It is being auto-archived.' % DAYS_INACTIVE
       channel_message += ' If you feel this is a mistake you can <https://slack.com/archives/archived|unarchive this channel> to bring it back at any point.'
